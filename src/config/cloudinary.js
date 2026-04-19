@@ -60,4 +60,5 @@ const eliminarCarpeta = async (vehiculo_id) => {
 }
 
 // Exportamos la configuración de Cloudinary, el middleware de Multer, y las funciones de subida y eliminación
-export { cloudinary, uploadDocumentos, subirBuffer, eliminarCarpeta }
+export { cloudinary, uploadDocumentos, subirBuffer, eliminarCarpeta } // 
+export default cloudinary
