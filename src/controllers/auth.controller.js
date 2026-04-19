@@ -54,7 +54,7 @@ const createAuthTokens = (usuario) => {
         rol: usuario.rol,
     }
 
-    const accessToken = jwt.sign(payload, process.env.JWT_SECRET, {
+    const accessToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
         expiresIn: process.env.JWT_EXPIRES_IN,
     })
 
