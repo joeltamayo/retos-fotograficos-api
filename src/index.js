@@ -1,52 +1,56 @@
-import 'dotenv/config' // Carga variables de entorno desde .env
-import express from 'express' // Framework web
-import cors from 'cors' // Middleware para CORS (permite frontend en otro dominio)
-import cookieParser from 'cookie-parser' // Middleware para parsear cookies (para JWT en cookies)
+import 'dotenv/config'
+
+import express from 'express'
+import cors from 'cors'
+import cookieParser from 'cookie-parser'
 
 import authRoutes from './routes/auth.routes.js'
-import adminRoutes from './routes/admin.routes.js'
+import homeRoutes from './routes/home.routes.js'
+import catalogosRoutes from './routes/catalogos.routes.js'
+import retosRoutes from './routes/retos.routes.js'
+import fotografiasRoutes from './routes/fotografias.routes.js'
+import galeriaRoutes from './routes/galeria.routes.js'
+import rankingRoutes from './routes/ranking.routes.js'
+import usuariosRoutes from './routes/usuarios.routes.js'
+import adminRetosRoutes from './routes/admin/admin.retos.routes.js'
+import adminFotografiasRoutes from './routes/admin/admin.fotografias.routes.js'
+import adminUsuariosRoutes from './routes/admin/admin.usuarios.routes.js'
 import { errorHandler } from './middlewares/errorHandler.js'
 
 const app = express()
-const PORT = process.env.PORT || 5500
+const PORT = process.env.PORT || 3000
+const FRONTEND_URL = process.env.FRONTEND_URL
 
-// Forzar UTF-8 en todas las respuestas JSON para que los acentos
-// y caracteres especiales del español se muestren correctamente
-app.use((req, res, next) => {
-    res.setHeader('Content-Type', 'application/json; charset=utf-8')
-    next()
-})
+// Middlewares globales base para todas las requests.
+app.use(cors({ origin: FRONTEND_URL, credentials: true }))
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+app.use(cookieParser())
 
-// ─── CORS ────────────────────────────────────────────────────────────────────
-// Configuración de CORS para permitir solicitudes desde el frontend 
-// En producción, solo permitir el dominio del frontend (configurado en .env)
-// En desarrollo, permitir localhost:3000
-app.use(cors({
-    origin: process.env.NODE_ENV === 'production'
-        ? process.env.FRONTEND_URL
-        : 'http://localhost:5500',
-    credentials: true, // Permite enviar cookies (JWT) en solicitudes CORS
-}))
-
-// ─── Middlewares globales ─────────────────────────────────────────────────────
-app.use(cookieParser())  // Para leer cookies (donde guardamos el JWT)
-app.use(express.json())  // Para parsear JSON en el cuerpo de las solicitudes
-app.use(express.urlencoded({ extended: true })) // Para parsear datos de formularios (x-www-form-urlencoded)
-
-// ─── Rutas ───────────────────────────────────────────────────────────────────
-// Rutas organizadas por funcionalidad: auth (login), admin (CRUD)
+// Mapeo de rutas publicas y privadas por prefijo.
 app.use('/api/auth', authRoutes)
-app.use('/api/admin', adminRoutes)
+app.use('/api/home', homeRoutes)
+app.use('/api/catalogos', catalogosRoutes)
+app.use('/api/retos', retosRoutes)
+app.use('/api/fotografias', fotografiasRoutes)
+app.use('/api/galeria', galeriaRoutes)
+app.use('/api/ranking', rankingRoutes)
+app.use('/api/usuarios', usuariosRoutes)
+app.use('/api/admin/retos', adminRetosRoutes)
+app.use('/api/admin/fotografias', adminFotografiasRoutes)
+app.use('/api/admin/usuarios', adminUsuariosRoutes);
 
-// Ruta raíz para verificar que el servidor está corriendo
+// Endpoint de salud basico para confirmar que el servicio esta vivo.
 app.get('/', (req, res) => {
     res.json({ status: 'ok', mensaje: 'API de retos fotograficos express en línea' })
 })
 
-// ─── Manejo de rutas no encontradas ─────────────────────────
-// Si ninguna ruta coincide, respondemos con 404
+// 404 para cualquier endpoint no registrado.
 app.use((req, res) => {
-    res.status(404).json({ error: `Ruta ${req.method} ${req.path} no encontrada` })
+    res.status(404).json({
+        error: 'ENDPOINT_NO_ENCONTRADO',
+        detalle: `${req.method} ${req.originalUrl}`,
+    })
 })
 
 // ─── Middleware global de errores ────────────────────────────
