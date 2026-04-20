@@ -1,105 +1,155 @@
 // ============================================================
-//  Auth Controller
+//  Controlador de autenticacion
 //
-//  Este modulo concentra toda la logica de autenticacion:
-//  - Registro de cuenta
-//  - Login
-//  - Refresh token (rotacion)
-//  - Logout
-//  - Endpoint de sesion activa (me)
+//  Este modulo concentra la logica de:
+//  - registro de usuarios
+//  - inicio de sesion
+//  - renovacion de sesion con refresh token
+//  - cierre de sesion
 //
-//  Diseno general:
-//  1) Access token (corto) en cookie httpOnly -> acceso a rutas protegidas.
-//  2) Refresh token (largo) en cookie httpOnly -> renovacion de sesion.
-//  3) En BD se guarda SOLO el hash SHA-256 del refresh token.
-//     Esto evita exponer tokens utilizables si se filtra la BD.
-//  4) Errores via next(error) para centralizar respuestas en errorHandler.
+//  Diseño general:
+//  1) El access token dura poco y va en cookie httpOnly.
+//  2) El refresh token dura mas y permite renovar la sesion.
+//  3) En la base de datos no guardamos el refresh token en texto plano:
+//     guardamos su hash SHA-256.
+//  4) Si algo falla, se pasa el error con next(error) para que
+//     errorHandler unifique la respuesta HTTP.
 // ============================================================
 
 import bcrypt from 'bcrypt'
 import { createHash } from 'crypto'
 import jwt from 'jsonwebtoken'
-import pool from '../config/db.js'
+import db from '../config/db.js'
 
+const SALT_ROUNDS = 12
 const ACCESS_TOKEN_COOKIE = 'access_token'
 const REFRESH_TOKEN_COOKIE = 'refresh_token'
+const REFRESH_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 7 dias en milisegundos
 
-// Configuracion unica de cookies de sesion.
-// Se usa en set/clear para mantener comportamiento consistente.
-const cookieOpts = (maxAge) => ({
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge,
-})
+// Convierte strings tipo "15m" o "7d" a milisegundos.
+// Se usa para poner maxAge coherente en las cookies.
+const durationToMs = (duration) => {
+    if (typeof duration !== 'string') {
+        return 0
+    }
 
-// Fabrica de errores HTTP para simplificar los controladores.
+    const match = duration.trim().match(/^(\d+)([smhd])$/i)
+    if (!match) {
+        return 0
+    }
+
+    const value = Number(match[1])
+    const unit = match[2].toLowerCase()
+
+    const factors = {
+        s: 1000,
+        m: 60 * 1000,
+        h: 60 * 60 * 1000,
+        d: 24 * 60 * 60 * 1000,
+    }
+
+    return value * factors[unit]
+}
+
+// Crea errores HTTP simples para delegarlos a errorHandler.
 const createHttpError = (status, message) => {
     const error = new Error(message)
     error.status = status
     return error
 }
 
-// Evita strings vacios y tipos no string en validaciones basicas.
+// Valida que un campo sea texto no vacio.
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== ''
 
-// Hash SHA-256 del refresh token para persistir solo huella digital.
+// Normaliza el correo para evitar duplicados por mayusculas/minusculas.
+const normalizeEmail = (correo) => correo.trim().toLowerCase()
+
+// Calcula el SHA-256 de un texto.
+// Aqui se usa para guardar el refresh token de forma segura en BD.
 const hashToken = (token) => createHash('sha256').update(token).digest('hex')
 
-// Genera ambos JWTs a partir de id/rol del usuario.
-// Separar esto evita duplicar logica entre login/registro/refresh.
-const createAuthTokens = (usuario) => {
+// Genera access token y refresh token a partir del usuario.
+// Tambien guarda el hash del refresh token en refresh_tokens.
+const generarTokens = async (usuario) => {
     const payload = {
         id: usuario.id,
         rol: usuario.rol,
+        nombre_usuario: usuario.nombre_usuario,
     }
 
     const accessToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
-        expiresIn: process.env.JWT_EXPIRES_IN,
+        expiresIn: process.env.JWT_ACCESS_EXPIRES,
     })
 
     const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
-        expiresIn: process.env.JWT_REFRESH_EXPIRES_IN,
+        expiresIn: process.env.JWT_REFRESH_EXPIRES,
     })
+
+    const refreshTokenHash = hashToken(refreshToken)
+    const refreshExpiresAt = new Date(Date.now() + durationToMs(process.env.JWT_REFRESH_EXPIRES))
+
+    await db.query(
+        `INSERT INTO refresh_tokens (usuario_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)`,
+        [usuario.id, refreshTokenHash, refreshExpiresAt]
+    )
 
     return { accessToken, refreshToken }
 }
 
-// Obtiene fecha de expiracion desde el propio JWT refresh (claim exp).
-// Esta fecha se guarda en BD para invalidaciones y limpieza deterministica.
-const getRefreshTokenExpiryDate = (refreshToken) => {
-    const decoded = jwt.decode(refreshToken)
-    if (!decoded?.exp) {
-        throw createHttpError(500, 'No se pudo calcular la expiracion del refresh token')
+// Pone las cookies de sesion con la misma politica en toda la app.
+// sameSite strict reduce el riesgo de que el navegador envie cookies
+// en contextos externos no deseados.
+const setTokenCookies = (res, accessToken, refreshToken) => {
+    const cookieBase = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
     }
-    return new Date(decoded.exp * 1000)
+
+    res.cookie(ACCESS_TOKEN_COOKIE, accessToken, {
+        ...cookieBase,
+        maxAge: durationToMs(process.env.JWT_ACCESS_EXPIRES),
+    })
+
+    res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, {
+        ...cookieBase,
+        maxAge: REFRESH_TOKEN_MAX_AGE_MS,
+    })
 }
 
-// Emite cookies de sesion.
-const setAuthCookies = (res, accessToken, refreshToken) => {
-    res.cookie(ACCESS_TOKEN_COOKIE, accessToken, cookieOpts(15 * 60 * 1000))
-    res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, cookieOpts(7 * 24 * 60 * 60 * 1000))
+// Elimina ambas cookies de autenticacion del navegador.
+const clearTokenCookies = (res) => {
+    const cookieBase = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+    }
+
+    res.clearCookie(ACCESS_TOKEN_COOKIE, cookieBase)
+    res.clearCookie(REFRESH_TOKEN_COOKIE, cookieBase)
 }
 
-// Elimina cookies de sesion del cliente.
-const clearAuthCookies = (res) => {
-    res.clearCookie(ACCESS_TOKEN_COOKIE, cookieOpts(0))
-    res.clearCookie(REFRESH_TOKEN_COOKIE, cookieOpts(0))
-}
+// Devuelve solo los datos publicos del usuario, sin hashes ni datos internos.
+const publicUser = (usuario) => ({
+    id: usuario.id,
+    nombre: usuario.nombre,
+    apellido: usuario.apellido,
+    nombre_usuario: usuario.nombre_usuario,
+    correo: usuario.correo,
+    rol: usuario.rol,
+})
 
 /**
  * POST /api/auth/registro
  *
- * Flujo:
- * 1) Validar campos requeridos.
- * 2) Verificar unicidad de correo y nombre_usuario.
- * 3) Hashear contrasena con bcrypt.
- * 4) Insertar usuario con rol usuario.
- * 5) Generar tokens y guardar hash de refresh token.
- * 6) Confirmar transaccion y responder con cookies + usuario basico.
- *
- * - Si falla cualquier paso (insert usuario o insert refresh token),
- *   no queda informacion parcial en BD.
+ * Crea un usuario nuevo con rol 'usuario'.
+ * Flujo resumido:
+ * 1) validar campos
+ * 2) revisar duplicados
+ * 3) hashear contrasena
+ * 4) insertar usuario
+ * 5) generar tokens y cookies
  */
 export const registro = async (req, res, next) => {
     const { nombre, apellido, nombre_usuario, correo, contrasena } = req.body
@@ -111,147 +161,104 @@ export const registro = async (req, res, next) => {
     const nombreNormalizado = nombre.trim()
     const apellidoNormalizado = apellido.trim()
     const nombreUsuarioNormalizado = nombre_usuario.trim()
-    const correoNormalizado = correo.trim().toLowerCase()
-
-    const client = await pool.connect()
+    const correoNormalizado = normalizeEmail(correo)
 
     try {
-        await client.query('BEGIN')
-
-        const existeResult = await client.query(
-            `SELECT correo, nombre_usuario
-               FROM usuarios
-              WHERE correo = $1 OR nombre_usuario = $2
-              LIMIT 1`,
+        const existente = await db.query(
+            `SELECT id, correo, nombre_usuario
+             FROM usuarios
+             WHERE correo = $1 OR nombre_usuario = $2
+             LIMIT 1`,
             [correoNormalizado, nombreUsuarioNormalizado]
         )
 
-                // Mensaje preciso para facilitar correccion en frontend.
-        if (existeResult.rows.length > 0) {
-            const usuarioExistente = existeResult.rows[0]
+        if (existente.rows.length > 0) {
+            const usuarioExistente = existente.rows[0]
+
             if (usuarioExistente.correo === correoNormalizado) {
-                throw createHttpError(409, 'El correo ya esta registrado')
+                return next(createHttpError(409, 'El correo ya existe'))
             }
+
             if (usuarioExistente.nombre_usuario === nombreUsuarioNormalizado) {
-                throw createHttpError(409, 'El nombre de usuario ya esta en uso')
+                return next(createHttpError(409, 'El nombre de usuario ya existe'))
             }
-            throw createHttpError(409, 'Ya existe un usuario con esos datos')
+
+            return next(createHttpError(409, 'Ya existe un registro con esos datos'))
         }
 
-        const contrasenaHash = await bcrypt.hash(contrasena, 12)
+        const contrasenaHash = await bcrypt.hash(contrasena, SALT_ROUNDS)
 
-        const nuevoUsuarioResult = await client.query(
+        const result = await db.query(
             `INSERT INTO usuarios (nombre, apellido, nombre_usuario, correo, contrasena_hash, rol, estado)
              VALUES ($1, $2, $3, $4, $5, 'usuario', 'activo')
-             RETURNING id, nombre_usuario, rol`,
+             RETURNING id, nombre, apellido, nombre_usuario, correo, rol`,
             [nombreNormalizado, apellidoNormalizado, nombreUsuarioNormalizado, correoNormalizado, contrasenaHash]
         )
 
-        const usuario = nuevoUsuarioResult.rows[0]
-        const { accessToken, refreshToken } = createAuthTokens(usuario)
+        const usuario = result.rows[0]
+        const { accessToken, refreshToken } = await generarTokens(usuario)
+        setTokenCookies(res, accessToken, refreshToken)
 
-        await client.query(
-            `INSERT INTO refresh_tokens (usuario_id, token_hash, expires_at)
-             VALUES ($1, $2, $3)`,
-            [usuario.id, hashToken(refreshToken), getRefreshTokenExpiryDate(refreshToken)]
-        )
-
-        await client.query('COMMIT')
-
-        setAuthCookies(res, accessToken, refreshToken)
-        return res.status(201).json({ usuario })
+        return res.status(201).json({ usuario: publicUser(usuario) })
     } catch (error) {
-        try {
-            await client.query('ROLLBACK')
-        } catch {
-            // No-op: si el rollback falla, se delega el error original.
-        }
         return next(error)
-    } finally {
-        client.release()
     }
 }
 
 /**
  * POST /api/auth/login
  *
- * Flujo:
- * 1) Validar body.
- * 2) Buscar usuario por correo.
- * 3) Comparar contrasena con hash bcrypt.
- * 4) Bloquear usuarios suspendidos.
- * 5) Actualizar ultimo_login y persistir nuevo refresh token hash.
- * 6) Responder con usuario basico y cookies.
+ * Inicia sesion para usuarios y administradores.
+ * Reglas:
+ * - buscar por correo
+ * - validar contrasena
+ * - bloquear suspendidos
+ * - actualizar ultimo_login
  */
 export const login = async (req, res, next) => {
     const { correo, contrasena } = req.body
 
     if (!isNonEmptyString(correo) || !isNonEmptyString(contrasena)) {
-        return next(createHttpError(400, 'Correo y contrasena requeridos'))
+        return next(createHttpError(400, 'Correo y contrasena son obligatorios'))
     }
 
-    const correoNormalizado = correo.trim().toLowerCase()
+    const correoNormalizado = normalizeEmail(correo)
 
     try {
-        const usuarioResult = await pool.query(
-            `SELECT id, nombre_usuario, rol, estado, contrasena_hash
-               FROM usuarios
-              WHERE correo = $1
-              LIMIT 1`,
+        const result = await db.query(
+            `SELECT id, nombre, apellido, nombre_usuario, correo, rol, estado, contrasena_hash
+             FROM usuarios
+             WHERE correo = $1
+             LIMIT 1`,
             [correoNormalizado]
         )
 
-        if (usuarioResult.rows.length === 0) {
-            throw createHttpError(401, 'Credenciales incorrectas')
+        if (result.rows.length === 0) {
+            return next(createHttpError(401, 'Credenciales incorrectas'))
         }
 
-        const usuario = usuarioResult.rows[0]
+        const usuario = result.rows[0]
         const contrasenaValida = await bcrypt.compare(contrasena, usuario.contrasena_hash)
 
         if (!contrasenaValida) {
-            throw createHttpError(401, 'Credenciales incorrectas')
+            return next(createHttpError(401, 'Credenciales incorrectas'))
         }
 
         if (usuario.estado === 'suspendido') {
-            throw createHttpError(403, 'Tu cuenta esta suspendida')
+            return next(createHttpError(403, 'Usuario suspendido'))
         }
 
-        const { accessToken, refreshToken } = createAuthTokens(usuario)
+        await db.query(
+            `UPDATE usuarios
+             SET ultimo_login = NOW()
+             WHERE id = $1`,
+            [usuario.id]
+        )
 
-        // Se agrupa en transaccion para que ultimo_login y refresh token
-        // queden sincronizados en el mismo evento de login.
-        const client = await pool.connect()
-        try {
-            await client.query('BEGIN')
-            await client.query(
-                `UPDATE usuarios SET ultimo_login = NOW() WHERE id = $1`,
-                [usuario.id]
-            )
-            await client.query(
-                `INSERT INTO refresh_tokens (usuario_id, token_hash, expires_at)
-                 VALUES ($1, $2, $3)`,
-                [usuario.id, hashToken(refreshToken), getRefreshTokenExpiryDate(refreshToken)]
-            )
-            await client.query('COMMIT')
-        } catch (error) {
-            try {
-                await client.query('ROLLBACK')
-            } catch {
-                // No-op: si rollback falla, se delega el error original.
-            }
-            throw error
-        } finally {
-            client.release()
-        }
+        const { accessToken, refreshToken } = await generarTokens(usuario)
+        setTokenCookies(res, accessToken, refreshToken)
 
-        setAuthCookies(res, accessToken, refreshToken)
-        return res.status(200).json({
-            usuario: {
-                id: usuario.id,
-                nombre_usuario: usuario.nombre_usuario,
-                rol: usuario.rol,
-            },
-        })
+        return res.status(200).json({ usuario: publicUser(usuario) })
     } catch (error) {
         return next(error)
     }
@@ -260,159 +267,96 @@ export const login = async (req, res, next) => {
 /**
  * POST /api/auth/refresh
  *
- * Implementa rotacion de refresh token:
- * - Verifica firma JWT.
- * - Verifica existencia del hash en BD (token no revocado).
- * - Valida que pertenezca al mismo usuario y no este expirado.
- * - Elimina token anterior e inserta uno nuevo.
- *
+ * Renueva la sesion usando la cookie refresh_token.
+ * Hace rotacion: elimina el refresh viejo y crea uno nuevo.
  */
 export const refresh = async (req, res, next) => {
     const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE]
 
     if (!refreshToken) {
-        return next(createHttpError(401, 'Refresh token no encontrado'))
+        return next(createHttpError(401, 'NO_AUTORIZADO'))
     }
 
-    let payload
     try {
-        payload = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET)
-    } catch {
-        return next(createHttpError(401, 'Refresh token invalido o expirado'))
-    }
+        let payload
+        try {
+            payload = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET)
+        } catch {
+            return next(createHttpError(401, 'NO_AUTORIZADO'))
+        }
 
-    const refreshTokenHash = hashToken(refreshToken)
-    const client = await pool.connect()
+        const refreshTokenHash = hashToken(refreshToken)
 
-    try {
-        await client.query('BEGIN')
-
-        const tokenResult = await client.query(
+        const result = await db.query(
             `SELECT rt.id AS refresh_id,
                     rt.usuario_id,
                     rt.expires_at,
+                    u.id,
+                    u.nombre,
+                    u.apellido,
                     u.nombre_usuario,
+                    u.correo,
                     u.rol,
                     u.estado
-               FROM refresh_tokens rt
-               JOIN usuarios u ON u.id = rt.usuario_id
-              WHERE rt.token_hash = $1
-              FOR UPDATE`,
+             FROM refresh_tokens rt
+             INNER JOIN usuarios u ON u.id = rt.usuario_id
+             WHERE rt.token_hash = $1
+             LIMIT 1`,
             [refreshTokenHash]
         )
 
-        if (tokenResult.rows.length === 0) {
-            throw createHttpError(401, 'Refresh token invalido o revocado')
+        if (result.rows.length === 0) {
+            return next(createHttpError(401, 'NO_AUTORIZADO'))
         }
 
-        const tokenData = tokenResult.rows[0]
-
-        if (payload.id !== tokenData.usuario_id) {
-            throw createHttpError(401, 'Refresh token invalido')
-        }
-
-        if (tokenData.estado === 'suspendido') {
-            throw createHttpError(403, 'Tu cuenta esta suspendida')
-        }
+        const tokenData = result.rows[0]
 
         if (new Date(tokenData.expires_at) <= new Date()) {
-            await client.query(`DELETE FROM refresh_tokens WHERE id = $1`, [tokenData.refresh_id])
-            throw createHttpError(401, 'Refresh token expirado')
+            await db.query('DELETE FROM refresh_tokens WHERE id = $1', [tokenData.refresh_id])
+            return next(createHttpError(401, 'NO_AUTORIZADO'))
         }
 
-        const usuarioToken = {
-            id: tokenData.usuario_id,
+        if (payload.id !== tokenData.usuario_id) {
+            return next(createHttpError(401, 'NO_AUTORIZADO'))
+        }
+
+        await db.query('DELETE FROM refresh_tokens WHERE id = $1', [tokenData.refresh_id])
+
+        const usuario = {
+            id: tokenData.id,
+            nombre: tokenData.nombre,
+            apellido: tokenData.apellido,
+            nombre_usuario: tokenData.nombre_usuario,
+            correo: tokenData.correo,
             rol: tokenData.rol,
         }
 
-        const { accessToken, refreshToken: nuevoRefreshToken } = createAuthTokens(usuarioToken)
+        const { accessToken, refreshToken: nuevoRefreshToken } = await generarTokens(usuario)
+        setTokenCookies(res, accessToken, nuevoRefreshToken)
 
-        // Rotacion atomica: se invalida token viejo antes de guardar el nuevo.
-        await client.query(`DELETE FROM refresh_tokens WHERE id = $1`, [tokenData.refresh_id])
-        await client.query(
-            `INSERT INTO refresh_tokens (usuario_id, token_hash, expires_at)
-             VALUES ($1, $2, $3)`,
-            [tokenData.usuario_id, hashToken(nuevoRefreshToken), getRefreshTokenExpiryDate(nuevoRefreshToken)]
-        )
-
-        await client.query('COMMIT')
-
-        setAuthCookies(res, accessToken, nuevoRefreshToken)
         return res.status(200).json({ ok: true })
     } catch (error) {
-        try {
-            await client.query('ROLLBACK')
-        } catch {
-            // No-op: si rollback falla, se delega el error original.
-        }
         return next(error)
-    } finally {
-        client.release()
     }
 }
 
 /**
  * POST /api/auth/logout
  *
- * Revoca el refresh token activo del usuario autenticado y limpia cookies.
- * Si no existe cookie de refresh, igualmente limpia cookies y responde ok.
+ * Elimina el refresh token de la base de datos y limpia cookies.
+ * No importa si el token ya no existe en BD: igual cerramos sesion.
  */
 export const logout = async (req, res, next) => {
     const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE]
 
     try {
         if (refreshToken) {
-            await pool.query(
-                `DELETE FROM refresh_tokens
-                  WHERE token_hash = $1
-                    AND usuario_id = $2`,
-                [hashToken(refreshToken), req.usuario.id]
-            )
+            const refreshTokenHash = hashToken(refreshToken)
+            await db.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [refreshTokenHash])
         }
 
-        clearAuthCookies(res)
+        clearTokenCookies(res)
         return res.status(200).json({ ok: true })
-    } catch (error) {
-        return next(error)
-    }
-}
-
-/**
- * GET /api/auth/me
- *
- * Retorna perfil basico de la sesion actual.
- * Se usa para restaurar estado de autenticacion al recargar frontend.
- */
-export const me = async (req, res, next) => {
-    try {
-        const usuarioResult = await pool.query(
-            `SELECT id, nombre, apellido, nombre_usuario, correo, rol, estado
-               FROM usuarios
-              WHERE id = $1
-              LIMIT 1`,
-            [req.usuario.id]
-        )
-
-        if (usuarioResult.rows.length === 0) {
-            throw createHttpError(401, 'Usuario no encontrado')
-        }
-
-        const usuario = usuarioResult.rows[0]
-
-        if (usuario.estado === 'suspendido') {
-            throw createHttpError(403, 'Tu cuenta esta suspendida')
-        }
-
-        return res.status(200).json({
-            usuario: {
-                id: usuario.id,
-                nombre: usuario.nombre,
-                apellido: usuario.apellido,
-                nombre_usuario: usuario.nombre_usuario,
-                correo: usuario.correo,
-                rol: usuario.rol,
-            },
-        })
     } catch (error) {
         return next(error)
     }

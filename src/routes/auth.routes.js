@@ -1,25 +1,25 @@
 // ============================================================
 //  Rutas de autenticación
 //
-//  Mapa de seguridad:
-//  - Publicas: registro, login, refresh
-//  - Protegidas: logout, me
+//  Este archivo solo declara el mapa de endpoints del grupo
+//  /api/auth. Toda la lógica real vive en el controller.
 //
-//  Estas rutas delegan toda la logica al controller para que
-//  el archivo de rutas se mantenga como "tabla de enrutamiento"
-//  facil de leer y mantener.
+//  Rutas:
+//  - POST /registro  -> registro
+//  - POST /login     -> login
+//  - POST /refresh   -> refresh
+//  - POST /logout    -> verificarToken + logout
 // ============================================================
 
 import { Router } from 'express'
-import { registro, login, logout, refresh, me } from '../controllers/auth.controller.js'
+import { registro, login, logout, refresh } from '../controllers/auth.controller.js'
 import { verificarToken } from '../middlewares/auth.js'
 
 const router = Router()
 
 router.post('/registro', registro)
 router.post('/login', login)
-router.post('/logout', verificarToken, logout)
 router.post('/refresh', refresh)
-router.get('/me', verificarToken, me)
+router.post('/logout', verificarToken, logout)
 
 export default router
