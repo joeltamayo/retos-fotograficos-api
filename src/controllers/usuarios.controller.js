@@ -82,6 +82,43 @@ export const getPerfil = async (req, res, next) => {
 }
 
 /**
+ * GET /api/usuarios/me
+ *
+ * Devuelve el perfil completo del usuario autenticado.
+ */
+export const getMiPerfil = async (req, res, next) => {
+	try {
+		const nombreUsuario = req.usuario?.nombre_usuario
+
+		if (!isNonEmptyString(nombreUsuario)) {
+			return next(createHttpError(401, 'No autorizado'))
+		}
+
+		const result = await db.query(
+			`SELECT *
+			 FROM vista_perfil_usuario
+			 WHERE nombre_usuario = $1
+			 LIMIT 1`,
+			[nombreUsuario.trim()]
+		)
+
+		if (result.rowCount === 0) {
+			return next(createHttpError(404, 'Perfil no encontrado'))
+		}
+
+		const perfil = result.rows[0]
+
+		if (perfil.estado === 'suspendido') {
+			return next(createHttpError(404, 'Perfil no encontrado'))
+		}
+
+		return res.status(200).json(perfil)
+	} catch (error) {
+		return next(error)
+	}
+}
+
+/**
  * GET /api/usuarios/:nombreUsuario/fotos
  *
  * Query params:

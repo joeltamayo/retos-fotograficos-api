@@ -15,6 +15,8 @@ const handlerNoImplementado = (nombre) => (req, res) => {
 
 const getMisParticipaciones = usuariosController.getMisParticipaciones
 	?? handlerNoImplementado('usuarios.controller.getMisParticipaciones')
+const getMiPerfil = usuariosController.getMiPerfil
+	?? handlerNoImplementado('usuarios.controller.getMiPerfil')
 const editarPerfil = usuariosController.editarPerfil
 	?? handlerNoImplementado('usuarios.controller.editarPerfil')
 const getFotosUsuario = usuariosController.getFotosUsuario
@@ -29,6 +31,10 @@ const getPerfil = usuariosController.getPerfil
 // GET /api/usuarios/me/participaciones
 // Requiere sesion activa y devuelve participaciones del usuario logueado.
 router.get('/me/participaciones', verificarToken, getMisParticipaciones)
+
+// GET /api/usuarios/me
+// Requiere sesion activa y devuelve el perfil completo del usuario autenticado.
+router.get('/me', verificarToken, getMiPerfil)
 
 // PUT /api/usuarios/me
 // Requiere sesion, permite actualizar perfil y foto (foto_perfil).
