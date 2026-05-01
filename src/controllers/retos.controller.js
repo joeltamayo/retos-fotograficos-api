@@ -273,3 +273,39 @@ export const participar = async (req, res, next) => {
 		return next(error)
 	}
 }
+
+/**
+ * DELETE /api/retos/:retoId/participar
+ *
+ * Revierte la participacion del usuario en un reto.
+ * Se usa cuando falla la carga de fotografia para deshacer una participacion incompleta.
+ */
+export const deshacerParticipacion = async (req, res, next) => {
+	try {
+		const { retoId } = req.params
+		const usuarioId = req.usuario?.id
+
+		if (!usuarioId) {
+			throw createHttpError(401, 'No autorizado')
+		}
+
+		const deleteResult = await db.query(
+			`
+				DELETE FROM participaciones
+				WHERE usuario_id = $1 AND reto_id = $2
+				RETURNING id
+			`,
+			[usuarioId, retoId]
+		)
+
+		if (deleteResult.rowCount === 0) {
+			throw createHttpError(404, 'No estabas participando en este reto')
+		}
+
+		return res.status(200).json({
+			mensaje: 'Participación cancelada correctamente',
+		})
+	} catch (error) {
+		return next(error)
+	}
+}

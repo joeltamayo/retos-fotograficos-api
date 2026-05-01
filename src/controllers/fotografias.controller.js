@@ -46,24 +46,40 @@ export const subirFoto = async (req, res, next) => {
 			throw createHttpError(401, 'No autorizado')
 		}
 
-		// 1) Verificar que el usuario ya participa en el reto.
+		// 1) El reto debe existir y estar activo para aceptar la foto.
+		const retoActivoResult = await client.query(
+			"SELECT id FROM retos WHERE id = $1 AND estado = 'activo' LIMIT 1",
+			[retoId]
+		)
+
+		if (retoActivoResult.rowCount === 0) {
+			throw createHttpError(400, 'El reto no existe o no esta activo')
+		}
+
+		// 2) Subir imagen a Cloudinary antes de abrir transaccion en DB.
+		const fotografiaId = randomUUID()
+		const cloudinaryResult = await subirImagen(archivo.buffer, {
+			folder: 'retos-fotograficos/fotos',
+			public_id: fotografiaId,
+		})
+
+		// 3) Crear participacion (si no existe) y guardar la foto de forma atomica.
+		await client.query('BEGIN')
+
 		const participacionResult = await client.query(
 			`
-				SELECT id
-				FROM participaciones
-				WHERE usuario_id = $1 AND reto_id = $2
-				LIMIT 1
+				INSERT INTO participaciones (usuario_id, reto_id)
+				VALUES ($1, $2)
+				ON CONFLICT (usuario_id, reto_id)
+				DO UPDATE SET usuario_id = EXCLUDED.usuario_id
+				RETURNING id
 			`,
 			[usuarioId, retoId]
 		)
 
-		if (participacionResult.rowCount === 0) {
-			throw createHttpError(403, 'Debes participar en el reto antes de subir una foto')
-		}
-
 		const participacionId = participacionResult.rows[0].id
 
-		// 2) Verificar que no exista foto previa para esa participacion.
+		// 4) Verificar que no exista foto previa para esa participacion.
 		const fotoExistenteResult = await client.query(
 			`
 				SELECT id
@@ -78,17 +94,7 @@ export const subirFoto = async (req, res, next) => {
 			throw createHttpError(409, 'Ya subiste una foto a este reto')
 		}
 
-		// 3) Generar UUID de la fotografia. Se usa tambien como public_id en Cloudinary.
-		const fotografiaId = randomUUID()
-
-		// 4) Subir imagen a Cloudinary desde buffer en memoria.
-		const cloudinaryResult = await subirImagen(archivo.buffer, {
-			folder: 'retos-fotograficos/fotos',
-			public_id: fotografiaId,
-		})
-
-		// 5) Persistir la foto en la base de datos dentro de una transaccion.
-		await client.query('BEGIN')
+		// 5) Persistir la foto en DB.
 
 		const insertResult = await client.query(
 			`

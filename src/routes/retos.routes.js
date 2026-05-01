@@ -4,6 +4,7 @@ import {
 	getRetosFinalizados,
 	getRetoPorId,
 	participar,
+	deshacerParticipacion,
 } from '../controllers/retos.controller.js'
 import { verificarToken } from '../middlewares/auth.js'
 
@@ -27,5 +28,9 @@ router.get('/:retoId', getRetoPorId)
 // POST /api/retos/:retoId/participar
 // Requiere sesion activa: primero validar token y luego registrar participacion.
 router.post('/:retoId/participar', verificarToken, participar)
+
+// DELETE /api/retos/:retoId/participar
+// Revierte la participacion del usuario en un reto (para uso emergente, ej: si falla carga de foto).
+router.delete('/:retoId/participar', verificarToken, deshacerParticipacion)
 
 export default router
