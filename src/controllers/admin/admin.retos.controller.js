@@ -181,22 +181,29 @@ const buildGetRetosFilters = ({ estado, categoriaId, buscar }) => {
 }
 
 // Limpia carpeta en Cloudinary sin romper el flujo cuando la carpeta no existe.
+// Normaliza distintos formatos de error que puede devolver la SDK (message, error.message, http_code, etc.)
 const eliminarCarpetaSiExiste = async (prefijo) => {
 	try {
-		await eliminarCarpeta(prefijo)
-	} catch (error) {
-		const mensaje = String(error?.message ?? '').toLowerCase()
+ 		await eliminarCarpeta(prefijo)
+ 	} catch (error) {
+ 		// Extraer texto útil del error, soportando varias formas que usa la SDK
+ 		const candidate = error?.message || error?.error?.message || error?.errors?.[0]?.message || error?.response?.body || error
+ 		const mensaje = String(candidate ?? '').toLowerCase()
 
-		if (
-			mensaje.includes('not found')
-			|| mensaje.includes('cant find folder')
-			|| mensaje.includes('can\'t find folder')
-		) {
-			return
-		}
+ 		// Si la SDK proporciona código HTTP 404, considerarlo inexistente
+ 		const httpCode = error?.http_code || error?.status_code || error?.status || (error?.response && error.response.status)
 
-		throw error
-	}
+ 		if (
+ 			Number(httpCode) === 404
+ 			|| mensaje.includes('not found')
+ 			|| mensaje.includes('cant find folder')
+ 			|| mensaje.includes("can't find folder")
+ 		) {
+ 			return
+ 		}
+
+ 		throw error
+ 	}
 }
 
 /**
@@ -658,6 +665,32 @@ export const eliminarReto = async (req, res, next) => {
 			await eliminarImagen(reto.imagen_public_id)
 		}
 
+		// Eliminar individualmente las fotografias asociadas al reto usando sus public_id
+		// (no todas las fotos se almacenan en una subcarpeta por reto, por eso borramos por public_id)
+		try {
+			const fotosResult = await db.query(
+				`SELECT imagen_public_id FROM fotografias WHERE reto_id = $1 AND imagen_public_id IS NOT NULL`,
+				[retoId]
+			)
+
+			if (fotosResult.rowCount > 0) {
+				for (const row of fotosResult.rows) {
+					const publicId = row.imagen_public_id
+					if (isNonEmptyString(publicId)) {
+						try {
+							await eliminarImagen(publicId)
+						} catch (err) {
+							// Si falla eliminar una imagen individual, continuamos con las demás.
+						}
+					}
+				}
+			}
+		} catch (err) {
+			// Si la consulta falla, no bloqueamos la eliminación del reto; volvemos a lanzar
+			return next(err)
+		}
+
+		// Intentar eliminar la carpeta específica por reto si existe (flujo seguro)
 		await eliminarCarpetaSiExiste(`retos-fotograficos/fotos/${retoId}`)
 
 		await db.query('DELETE FROM retos WHERE id = $1', [retoId])

@@ -28,6 +28,8 @@ const comentar = comentariosController.comentar
 	?? handlerNoImplementado('comentarios.controller.comentar')
 const eliminarComentario = comentariosController.eliminarComentario
 	?? handlerNoImplementado('comentarios.controller.eliminarComentario')
+const getMiFotografia = fotografiasController.getMiFotografia
+	?? handlerNoImplementado('fotografias.controller.getMiFotografia')
 
 // POST /api/fotografias/
 // Requiere sesion y una imagen en el campo "imagen".
@@ -36,6 +38,10 @@ router.post('/', verificarToken, subirUnaImagen, subirFoto)
 // GET /api/fotografias/:fotografiaId
 // Devuelve el detalle de una fotografia.
 router.get('/:fotografiaId', getFotografia)
+
+// GET /api/fotografias/:fotografiaId/mia
+// Ruta para que el dueño vea su propia foto (incluso en revisión)
+router.get('/:fotografiaId/mia', verificarToken, getMiFotografia);
 
 // GET /api/fotografias/:fotografiaId/calificaciones/mia
 // Devuelve la calificacion del usuario autenticado para esa foto.

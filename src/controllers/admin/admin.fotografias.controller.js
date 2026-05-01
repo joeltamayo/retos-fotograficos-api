@@ -256,6 +256,13 @@ export const eliminarFotografia = async (req, res, next) => {
 			await eliminarImagen(fotografia.imagen_public_id)
 		}
 
+		await db.query(
+			`DELETE FROM participaciones WHERE id = (
+    			SELECT participacion_id FROM fotografias WHERE id = $1
+			)`,
+			[fotografiaId]
+		);
+
 		await db.query('DELETE FROM fotografias WHERE id = $1', [fotografiaId])
 
 		return res.status(200).json({ ok: true })

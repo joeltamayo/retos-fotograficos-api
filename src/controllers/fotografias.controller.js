@@ -168,3 +168,18 @@ export const getFotografia = async (req, res, next) => {
 		return next(error)
 	}
 }
+
+// GET /api/fotografias/:id/mia
+// Permite al DUEÑO ver su propia foto aunque no esté aprobada
+export async function getMiFotografia(req, res, next) {
+	try {
+		const { fotografiaId } = req.params;
+		const result = await db.query(
+			`SELECT * FROM vista_detalle_fotografia
+       WHERE id = $1 AND usuario_id = $2`,
+			[fotografiaId, req.usuario.id]
+		);
+		if (!result.rows.length) return res.status(404).json({ error: 'Fotografía no encontrada' });
+		return res.json(result.rows[0]);
+	} catch (err) { next(err); }
+}
