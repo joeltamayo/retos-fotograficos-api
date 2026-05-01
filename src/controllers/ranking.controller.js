@@ -44,26 +44,60 @@ export const getRanking = async (req, res, next) => {
 
 		const intervalo = PERIODOS[periodo]
 
-		// Query base solicitada para ranking. Se agrega WHERE solo
-		// cuando el periodo NO es historico.
+		// Query base para ranking de FOTOS (no de usuarios).
+		// El promedio total se calcula aquí para no depender de una
+		// columna materializada en la vista.
 		const baseSelect = `
+			WITH ranking_base AS (
+				SELECT
+					fotografia_id,
+					foto_titulo,
+					foto_url,
+					imagen_public_id,
+					usuario_id,
+					nombre,
+					apellido,
+					nombre_usuario,
+					foto_perfil_url,
+					foto_perfil_public_id,
+					reto_id,
+					reto_titulo,
+					puntos_totales,
+					(prom_creatividad + prom_composicion + prom_tema) AS promedio_total,
+					total_calificaciones,
+					prom_creatividad,
+					prom_composicion,
+					prom_tema,
+					fecha_calificacion
+				FROM vista_ranking_base
+			)
 			SELECT
-				ROW_NUMBER() OVER (ORDER BY SUM(puntos_calificacion) DESC) AS posicion,
+				ROW_NUMBER() OVER (ORDER BY promedio_total DESC NULLS LAST, total_calificaciones DESC, puntos_totales DESC) AS posicion,
+				fotografia_id,
+				foto_titulo,
+				foto_url,
+				imagen_public_id,
 				usuario_id,
 				nombre,
 				apellido,
 				nombre_usuario,
 				foto_perfil_url,
-				SUM(puntos_calificacion) AS puntos_totales,
-				COUNT(DISTINCT fotografia_id) AS total_fotos_calificadas
-			FROM vista_ranking_base
+				foto_perfil_public_id,
+				reto_id,
+				reto_titulo,
+				puntos_totales,
+				promedio_total,
+				total_calificaciones,
+				prom_creatividad,
+				prom_composicion,
+				prom_tema
+			FROM ranking_base
 		`
 
 		const whereClause = intervalo ? 'WHERE fecha_calificacion >= NOW() - CAST($1 AS INTERVAL)' : ''
 
 		const tailQuery = `
-			GROUP BY usuario_id, nombre, apellido, nombre_usuario, foto_perfil_url
-			ORDER BY puntos_totales DESC
+			ORDER BY posicion
 			LIMIT 5
 		`
 
