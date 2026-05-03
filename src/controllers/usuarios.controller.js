@@ -212,23 +212,10 @@ export const getMisParticipaciones = async (req, res, next) => {
 		`
 
 		const participacionesQuery = `
-			SELECT
-				p.id AS participacion_id,
-				p.created_at AS fecha_participacion,
-				r.id AS reto_id,
-				r.titulo AS reto_titulo,
-				r.imagen_url AS reto_imagen,
-				r.fecha_fin,
-				r.estado AS reto_estado,
-				f.id AS fotografia_id,
-				f.titulo AS foto_titulo,
-				f.imagen_url AS foto_url,
-				f.estado AS foto_estado
-			FROM participaciones p
-			JOIN retos r ON r.id = p.reto_id
-			LEFT JOIN fotografias f ON f.participacion_id = p.id
-			WHERE p.usuario_id = $1
-			ORDER BY p.created_at DESC
+			SELECT *
+			FROM vista_participaciones_con_metricas
+			WHERE usuario_id = $1
+			ORDER BY fecha_participacion DESC
 			LIMIT $2 OFFSET $3
 		`
 
