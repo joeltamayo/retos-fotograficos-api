@@ -25,6 +25,8 @@ const cambiarEstado = adminUsuariosController.cambiarEstado
 	?? handlerNoImplementado('admin.usuarios.controller.cambiarEstado')
 const cambiarRol = adminUsuariosController.cambiarRol
 	?? handlerNoImplementado('admin.usuarios.controller.cambiarRol')
+const deleteUsuario = adminUsuariosController.deleteUsuario
+	?? handlerNoImplementado('admin.usuarios.controller.deleteUsuario')
 
 // GET /api/admin/usuarios
 // Lista usuarios con filtros y paginacion.
@@ -41,5 +43,9 @@ router.patch('/:usuarioId/estado', cambiarEstado)
 // PATCH /api/admin/usuarios/:usuarioId/rol
 // Cambia el rol del usuario (usuario/administrador).
 router.patch('/:usuarioId/rol', cambiarRol)
+
+// DELETE /api/admin/usuarios/:usuarioId
+// Elimina un usuario y todos sus datos relacionados.
+router.delete('/:usuarioId', deleteUsuario)
 
 export default router

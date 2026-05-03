@@ -323,3 +323,83 @@ export const cambiarRol = async (req, res, next) => {
 		return next(error)
 	}
 }
+
+/**
+ * DELETE /api/admin/usuarios/:usuarioId
+ *
+ * Elimina un usuario y todos sus datos relacionados (fotografias, participaciones, etc).
+ * Operacion en transaccion para garantizar consistencia.
+ */
+export const deleteUsuario = async (req, res, next) => {
+	let client
+
+	try {
+		const usuarioId = parseUuid(req.params.usuarioId, 'usuarioId')
+
+		client = await db.connect()
+		await client.query('BEGIN')
+
+		// Verificar que el usuario existe
+		const checkResult = await client.query(
+			`SELECT id FROM usuarios WHERE id = $1`,
+			[usuarioId]
+		)
+
+		if (checkResult.rowCount === 0) {
+			await client.query('ROLLBACK')
+			return next(createHttpError(404, 'Usuario no encontrado'))
+		}
+
+		// Eliminar comentarios del usuario
+		await client.query(
+			`DELETE FROM comentarios WHERE usuario_id = $1`,
+			[usuarioId]
+		)
+
+		// Eliminar calificaciones del usuario
+		await client.query(
+			`DELETE FROM calificaciones WHERE usuario_id = $1`,
+			[usuarioId]
+		)
+
+		// Eliminar fotografias del usuario (y sus calificaciones/comentarios asociados)
+		await client.query(
+			`DELETE FROM fotografias WHERE usuario_id = $1`,
+			[usuarioId]
+		)
+
+		// Eliminar participaciones del usuario
+		await client.query(
+			`DELETE FROM participaciones WHERE usuario_id = $1`,
+			[usuarioId]
+		)
+
+		// Eliminar refresh tokens
+		await client.query(
+			`DELETE FROM refresh_tokens WHERE usuario_id = $1`,
+			[usuarioId]
+		)
+
+		// Eliminar el usuario
+		const deleteResult = await client.query(
+			`DELETE FROM usuarios WHERE id = $1 RETURNING id`,
+			[usuarioId]
+		)
+
+		await client.query('COMMIT')
+
+		return res.status(200).json({
+			message: 'Usuario eliminado correctamente',
+			id: deleteResult.rows[0]?.id,
+		})
+	} catch (error) {
+		if (client) {
+			await client.query('ROLLBACK')
+		}
+		return next(error)
+	} finally {
+		if (client) {
+			client.release()
+		}
+	}
+}
