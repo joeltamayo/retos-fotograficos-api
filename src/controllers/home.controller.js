@@ -8,6 +8,36 @@
 
 import db from '../config/db.js'
 
+const syncEstadosPorFecha = async () => {
+    await db.query(
+        `
+            UPDATE retos
+                        SET estado = 'finalizado'
+                        WHERE estado <> 'finalizado'
+                            AND fecha_fin <= NOW()
+        `
+    )
+
+    await db.query(
+        `
+            UPDATE retos
+                        SET estado = 'programado'
+                        WHERE estado <> 'finalizado'
+                            AND fecha_inicio > NOW()
+        `
+    )
+
+        await db.query(
+                `
+                        UPDATE retos
+                        SET estado = 'activo'
+                        WHERE estado <> 'finalizado'
+                            AND fecha_inicio <= NOW()
+                            AND fecha_fin > NOW()
+                `
+        )
+}
+
 /**
  * GET /api/home
  *
@@ -20,6 +50,8 @@ import db from '../config/db.js'
  */
 export const getHome = async (req, res, next) => {
     try {
+        await syncEstadosPorFecha()
+
         // Promise.all permite correr las 3 queries en paralelo.
         // Esto reduce el tiempo total comparado con ejecutarlas una por una.
         const [retosActivosResult, fotosDestacadasResult, fotosRecientesResult] = await Promise.all([

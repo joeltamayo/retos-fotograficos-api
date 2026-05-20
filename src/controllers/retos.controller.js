@@ -32,6 +32,37 @@ const createHttpError = (status, message) => {
 	return error
 }
 
+// Actualiza estados segun fecha de inicio/fin para mantenerlos vigentes.
+const syncEstadosPorFecha = async () => {
+	await db.query(
+		`
+			UPDATE retos
+			SET estado = 'finalizado'
+			WHERE estado <> 'finalizado'
+			  AND fecha_fin <= NOW()
+		`
+	)
+
+	await db.query(
+		`
+			UPDATE retos
+			SET estado = 'programado'
+			WHERE estado <> 'finalizado'
+			  AND fecha_inicio > NOW()
+		`
+	)
+
+	await db.query(
+		`
+			UPDATE retos
+			SET estado = 'activo'
+			WHERE estado <> 'finalizado'
+			  AND fecha_inicio <= NOW()
+			  AND fecha_fin > NOW()
+		`
+	)
+}
+
 // Construye WHERE dinamico para filtros opcionales de retos.
 // - etiqueta se filtra contra el array etiquetas de la vista
 // - categoria_id se compara de forma directa
@@ -67,6 +98,8 @@ const buildRetosFilters = ({ etiqueta, categoriaId }) => {
  */
 export const getRetosActivos = async (req, res, next) => {
 	try {
+		await syncEstadosPorFecha()
+
 		const pagina = toPositiveInt(req.query.pagina, 1)
 		const limite = toPositiveInt(req.query.limite, 9)
 		const offset = (pagina - 1) * limite
@@ -113,6 +146,8 @@ export const getRetosActivos = async (req, res, next) => {
  */
 export const getRetosFinalizados = async (req, res, next) => {
 	try {
+		await syncEstadosPorFecha()
+
 		const pagina = toPositiveInt(req.query.pagina, 1)
 		const limite = toPositiveInt(req.query.limite, 9)
 		const offset = (pagina - 1) * limite
@@ -160,6 +195,8 @@ export const getRetosFinalizados = async (req, res, next) => {
  */
 export const getRetoPorId = async (req, res, next) => {
 	try {
+		await syncEstadosPorFecha()
+
 		const { retoId } = req.params
 		const pagina = toPositiveInt(req.query.pagina, 1)
 		const limite = toPositiveInt(req.query.limite, 12)
