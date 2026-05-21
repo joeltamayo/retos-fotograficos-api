@@ -1,5 +1,7 @@
 import 'dotenv/config'
 
+import path from 'path'
+import { fileURLToPath } from 'url'
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
@@ -17,6 +19,9 @@ import adminFotografiasRoutes from './routes/admin/admin.fotografias.routes.js'
 import adminUsuariosRoutes from './routes/admin/admin.usuarios.routes.js'
 import { errorHandler } from './middlewares/errorHandler.js'
 
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
 const app = express()
 const PORT = process.env.PORT || 5500
 const FRONTEND_URL = process.env.FRONTEND_URL
@@ -26,6 +31,10 @@ app.use(cors({ origin: FRONTEND_URL, credentials: true }))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
+
+// Servir archivos estáticos del frontend
+const frontendPath = path.join(__dirname, '../../frontend')
+app.use(express.static(frontendPath))
 
 // Mapeo de rutas publicas y privadas por prefijo.
 app.use('/api/auth', authRoutes)
@@ -41,16 +50,13 @@ app.use('/api/admin/fotografias', adminFotografiasRoutes)
 app.use('/api/admin/usuarios', adminUsuariosRoutes);
 
 // Endpoint de salud basico para confirmar que el servicio esta vivo.
-app.get('/', (req, res) => {
+app.get('/api', (req, res) => {
     res.json({ status: 'ok', mensaje: 'API de retos fotograficos express en línea' })
 })
 
-// 404 para cualquier endpoint no registrado.
-app.use((req, res) => {
-    res.status(404).json({
-        error: 'ENDPOINT_NO_ENCONTRADO',
-        detalle: `${req.method} ${req.originalUrl}`,
-    })
+// Fallback para SPA: servir index.html para rutas no coincidentes
+app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendPath, 'index.html'))
 })
 
 // ─── Middleware global de errores ────────────────────────────
