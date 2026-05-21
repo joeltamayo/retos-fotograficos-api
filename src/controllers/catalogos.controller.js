@@ -21,6 +21,20 @@ import db from '../config/db.js'
  */
 export const getCategorias = async (req, res, next) => {
     try {
+        const search = String(req.query.search || '').trim()
+        if (search) {
+            const resultado = await db.query(
+                `SELECT id, nombre
+                 FROM categorias
+                 WHERE similarity(nombre, $1) > 0.2
+                 ORDER BY similarity(nombre, $1) DESC, nombre ASC
+                 LIMIT 8`,
+                [search]
+            )
+
+            return res.status(200).json({ categorias: resultado.rows })
+        }
+
         const resultado = await db.query(
             'SELECT id, nombre, descripcion FROM categorias ORDER BY nombre ASC'
         )
@@ -45,6 +59,36 @@ export const getEtiquetas = async (req, res, next) => {
         )
 
         res.status(200).json({ etiquetas: resultado.rows })
+    } catch (error) {
+        next(error)
+    }
+}
+
+/**
+ * Crea una categoria nueva.
+ */
+export const createCategoria = async (req, res, next) => {
+    try {
+        const nombre = String(req.body?.nombre || '').trim()
+        if (!nombre) {
+            return res.status(400).json({ error: 'Nombre requerido.' })
+        }
+
+        const existing = await db.query(
+            'SELECT id FROM categorias WHERE LOWER(nombre) = LOWER($1) LIMIT 1',
+            [nombre]
+        )
+
+        if (existing.rowCount > 0) {
+            return res.status(409).json({ error: 'La categoría ya existe.' })
+        }
+
+        const resultado = await db.query(
+            'INSERT INTO categorias (nombre) VALUES ($1) RETURNING id, nombre, descripcion',
+            [nombre]
+        )
+
+        res.status(201).json({ categoria: resultado.rows[0] })
     } catch (error) {
         next(error)
     }
