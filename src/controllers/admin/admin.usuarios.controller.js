@@ -142,10 +142,10 @@ export const getUsuarios = async (req, res, next) => {
 		const resumenQuery = `
 			SELECT
 				COUNT(*)::int AS total,
+				COUNT(*) FILTER (WHERE rol IN ('administrador', 'admin'))::int AS administradores,
 				COUNT(*) FILTER (WHERE estado = 'activo')::int AS activos,
 				COUNT(*) FILTER (WHERE estado = 'suspendido')::int AS suspendidos
 			FROM usuarios
-			WHERE rol = 'usuario'
 		`
 
 		const totalQuery = `

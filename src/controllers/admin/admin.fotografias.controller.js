@@ -138,6 +138,8 @@ export const getfotografias = async (req, res, next) => {
 				f.usuario_id,
 				f.reto_id,
 				u.nombre_usuario,
+				u.foto_perfil_url,
+				u.foto_perfil_public_id,
 				r.titulo AS reto_titulo,
 				COUNT(DISTINCT c.id)::int AS total_calificaciones,
 				COUNT(DISTINCT cm.id)::int AS total_comentarios,
@@ -148,7 +150,7 @@ export const getfotografias = async (req, res, next) => {
 			LEFT JOIN calificaciones c ON c.fotografia_id = f.id
 			LEFT JOIN comentarios cm ON cm.fotografia_id = f.id
 			${whereClause}
-			GROUP BY f.id, u.nombre_usuario, r.titulo
+			GROUP BY f.id, u.nombre_usuario, u.foto_perfil_url, u.foto_perfil_public_id, r.titulo
 			ORDER BY f.created_at DESC
 			LIMIT $${params.length + 1}
 			OFFSET $${params.length + 2}
