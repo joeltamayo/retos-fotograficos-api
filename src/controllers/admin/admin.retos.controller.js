@@ -36,8 +36,20 @@ const toPositiveInt = (value, defaultValue) => {
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== ''
 
 // Convierte texto/valor de fecha a Date valida.
-const parseFecha = (value, fieldName) => {
-	const fecha = new Date(value)
+// Si llega YYYY-MM-DD, la interpreta en horario local.
+// Para fecha_fin puede fijarse al final del dia.
+const parseFecha = (value, fieldName, { endOfDay = false } = {}) => {
+	const esDateOnly = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+	let fecha
+
+	if (esDateOnly) {
+		const [year, month, day] = value.split('-').map((part) => Number.parseInt(part, 10))
+		fecha = endOfDay
+			? new Date(year, month - 1, day, 23, 59, 59, 999)
+			: new Date(year, month - 1, day, 0, 0, 0, 0)
+	} else {
+		fecha = new Date(value)
+	}
 
 	if (Number.isNaN(fecha.getTime())) {
 		throw createHttpError(400, `${fieldName} no es una fecha valida`)
@@ -364,7 +376,7 @@ export const crearReto = async (req, res, next) => {
 
 		const categoriaId = parseCategoriaId(categoriaIdRaw)
 		const fechaInicio = parseFecha(fechaInicioRaw, 'fecha_inicio')
-		const fechaFin = parseFecha(fechaFinRaw, 'fecha_fin')
+		const fechaFin = parseFecha(fechaFinRaw, 'fecha_fin', { endOfDay: true })
 
 		if (fechaFin <= fechaInicio) {
 			return next(createHttpError(400, 'fecha_fin debe ser mayor que fecha_inicio'))
@@ -530,7 +542,7 @@ export const editarReto = async (req, res, next) => {
 			: new Date(retoActual.fecha_inicio)
 
 		const fechaFinFinal = req.body.fecha_fin !== undefined
-			? parseFecha(req.body.fecha_fin, 'fecha_fin')
+			? parseFecha(req.body.fecha_fin, 'fecha_fin', { endOfDay: true })
 			: new Date(retoActual.fecha_fin)
 
 		if (fechaFinFinal <= fechaInicioFinal) {
