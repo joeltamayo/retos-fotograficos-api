@@ -84,6 +84,23 @@ const parseEstado = (estadoRaw, fieldName = 'estado') => {
 	return estado
 }
 
+// Deriva el estado automaticamente a partir de las fechas.
+// Regla:
+// - fecha_inicio > ahora => programado
+// - fecha_fin <= ahora => finalizado
+// - en cualquier otro caso => activo
+const deriveEstadoPorFechas = (fechaInicio, fechaFin, referencia = new Date()) => {
+	if (fechaFin <= referencia) {
+		return 'finalizado'
+	}
+
+	if (fechaInicio > referencia) {
+		return 'programado'
+	}
+
+	return 'activo'
+}
+
 // Detecta si un campo vino en el body, incluso si llego vacio.
 const hasBodyField = (body, key) => Object.prototype.hasOwnProperty.call(body, key)
 
@@ -531,12 +548,6 @@ export const editarReto = async (req, res, next) => {
 			agregarCampoUpdate('categoria_id', categoriaIdFinal)
 		}
 
-		let estadoFinal = retoActual.estado
-		if (req.body.estado !== undefined) {
-			estadoFinal = parseEstado(req.body.estado)
-			agregarCampoUpdate('estado', estadoFinal)
-		}
-
 		const fechaInicioFinal = req.body.fecha_inicio !== undefined
 			? parseFecha(req.body.fecha_inicio, 'fecha_inicio')
 			: new Date(retoActual.fecha_inicio)
@@ -548,6 +559,9 @@ export const editarReto = async (req, res, next) => {
 		if (fechaFinFinal <= fechaInicioFinal) {
 			throw createHttpError(400, 'fecha_fin debe ser mayor que fecha_inicio')
 		}
+
+		const estadoFinal = deriveEstadoPorFechas(fechaInicioFinal, fechaFinFinal)
+		agregarCampoUpdate('estado', estadoFinal)
 
 		if (req.body.fecha_inicio !== undefined) {
 			agregarCampoUpdate('fecha_inicio', fechaInicioFinal.toISOString())
