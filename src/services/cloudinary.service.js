@@ -28,9 +28,13 @@ import cloudinary from '../config/cloudinary.js'
  * Aqui lo envolvemos en Promise para usar async/await.
  */
 export const subirImagen = async (buffer, opciones = {}) => {
+	// Por defecto forzamos overwrite + invalidate para que los reemplazos
+	// (ej. avatars o reemplazo de imagen de reto) actualicen la CDN rápidamente.
+	const opcionesFinales = { overwrite: true, invalidate: true, ...opciones }
+
 	try {
 		const resultado = await new Promise((resolve, reject) => {
-			const stream = cloudinary.uploader.upload_stream(opciones, (error, result) => {
+			const stream = cloudinary.uploader.upload_stream(opcionesFinales, (error, result) => {
 				if (error) {
 					return reject(error)
 				}
