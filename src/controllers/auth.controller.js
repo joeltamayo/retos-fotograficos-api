@@ -68,6 +68,12 @@ const normalizeEmail = (correo) => correo.trim().toLowerCase()
 // Aqui se usa para guardar el refresh token de forma segura en BD.
 const hashToken = (token) => createHash('sha256').update(token).digest('hex')
 
+const getCookieOptions = () => ({
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+})
+
 // Genera access token y refresh token a partir del usuario.
 // Tambien guarda el hash del refresh token en refresh_tokens.
 const generarTokens = async (usuario) => {
@@ -101,11 +107,7 @@ const generarTokens = async (usuario) => {
 // sameSite strict reduce el riesgo de que el navegador envie cookies
 // en contextos externos no deseados.
 const setTokenCookies = (res, accessToken, refreshToken) => {
-    const cookieBase = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-    }
+    const cookieBase = getCookieOptions()
 
     res.cookie(ACCESS_TOKEN_COOKIE, accessToken, {
         ...cookieBase,
@@ -120,11 +122,7 @@ const setTokenCookies = (res, accessToken, refreshToken) => {
 
 // Elimina ambas cookies de autenticacion del navegador.
 const clearTokenCookies = (res) => {
-    const cookieBase = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-    }
+    const cookieBase = getCookieOptions()
 
     res.clearCookie(ACCESS_TOKEN_COOKIE, cookieBase)
     res.clearCookie(REFRESH_TOKEN_COOKIE, cookieBase)
