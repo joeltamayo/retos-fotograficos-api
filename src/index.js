@@ -54,10 +54,13 @@ app.get('/api', (req, res) => {
     res.json({ status: 'ok', mensaje: 'API de retos fotograficos express en línea' })
 })
 
+/*
 // Fallback para SPA: servir index.html para rutas no coincidentes
 app.get('*', (req, res) => {
     res.sendFile(path.join(frontendPath, 'index.html'))
 })
+
+*/
 
 // ─── Middleware global de errores ────────────────────────────
 app.use(errorHandler)
