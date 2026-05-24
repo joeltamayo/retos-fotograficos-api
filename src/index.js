@@ -26,8 +26,42 @@ const app = express()
 const PORT = process.env.PORT || 5500
 const FRONTEND_URL = process.env.FRONTEND_URL
 
+const allowedOrigins = [
+    ...String(process.env.FRONTEND_URLS || '')
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+    FRONTEND_URL,
+    'http://localhost:3000',
+    'http://localhost:5500',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5500',
+].filter(Boolean)
+
+function isAllowedOrigin(origin) {
+    if (!origin) {
+        return true
+    }
+
+    if (allowedOrigins.includes(origin)) {
+        return true
+    }
+
+    return /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
+}
+
 // Middlewares globales base para todas las requests.
-app.use(cors({ origin: FRONTEND_URL, credentials: true }))
+app.use(cors({
+    origin: (origin, callback) => {
+        if (isAllowedOrigin(origin)) {
+            callback(null, true)
+            return
+        }
+
+        callback(new Error(`Origen CORS no permitido: ${origin}`))
+    },
+    credentials: true,
+}))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
